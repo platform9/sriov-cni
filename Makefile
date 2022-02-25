@@ -22,6 +22,8 @@ export GO111MODULE=on
 IMAGEDIR=$(BASE)/images
 DOCKERFILE=$(CURDIR)/Dockerfile
 TAG=ghcr.io/k8snetworkplumbingwg/sriov-cni
+PF9_TAG=docker.io/platform9/sriov-cni:v2.6.2-pmk
+
 # Accept proxy settings for docker 
 DOCKERARGS=
 ifdef HTTP_PROXY
@@ -137,6 +139,14 @@ fmt: ; $(info  Running gofmt...) @ ## Run gofmt on all source files
 .PHONY: image
 image: | $(BASE) ; $(info Building Docker image...) @ ## Build SR-IOV CNI docker image
 	@docker build -t $(TAG) -f $(DOCKERFILE)  $(CURDIR) $(DOCKERARGS)
+
+
+# PF9 changes
+pf9-image: | $(BASE) ; $(info Building Docker image for pf9 Repo...) @ ## Build SR-IOV CNI docker image
+	@docker build -t $(PF9_TAG) -f $(DOCKERFILE)  $(CURDIR) $(DOCKERARGS)
+
+pf9-push:
+	docker push $(PF9_TAG)
 
 # Misc
 
