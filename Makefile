@@ -15,6 +15,15 @@ GOFILES = $(shell find . -name *.go | grep -vE "(\/vendor\/)|(_test.go)")
 PKGS     = $(or $(PKG),$(shell cd $(BASE) && env GOPATH=$(GOPATH) $(GO) list ./... | grep -v "^$(PACKAGE)/vendor/"))
 TESTPKGS = $(shell env GOPATH=$(GOPATH) $(GO) list -f '{{ if or .TestGoFiles .XTestGoFiles }}{{ .ImportPath }}{{ end }}' $(PKGS))
 
+UPSTREAM_VERSION=$(shell git describe --tags HEAD)
+registry_url ?= 514845858982.dkr.ecr.us-west-1.amazonaws.com
+#registry_url ?= docker.io
+
+image_name = ${registry_url}/platform9/sriov-cni
+image_tag = $(UPSTREAM_VERSION)-pmk-$(TEAMCITY_BUILD_ID)
+PF9_TAG=$(image_name):${image_tag}
+
+
 export GOPATH
 export GOBIN
 export GO111MODULE=on
@@ -22,7 +31,7 @@ export GO111MODULE=on
 IMAGEDIR=$(BASE)/images
 DOCKERFILE=$(CURDIR)/Dockerfile
 TAG=ghcr.io/k8snetworkplumbingwg/sriov-cni
-PF9_TAG=docker.io/platform9/sriov-cni:v2.6.2-pmk
+
 
 # Accept proxy settings for docker 
 DOCKERARGS=
@@ -146,7 +155,12 @@ pf9-image: | $(BASE) ; $(info Building Docker image for pf9 Repo...) @ ## Build 
 	@docker build -t $(PF9_TAG) -f $(DOCKERFILE)  $(CURDIR) $(DOCKERARGS)
 
 pf9-push:
-	docker push $(PF9_TAG)
+	docker push $(PF9_TAG) \
+	&& docker rmi $(PF9_TAG)
+	(docker push $(PF9_TAG)  || \
+		(aws ecr get-login --region=us-west-1 --no-include-email | sh && \
+		docker push $(PF9_TAG))) && \
+		docker rmi $(PF9_TAG)
 
 # Misc
 
