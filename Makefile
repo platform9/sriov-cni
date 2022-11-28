@@ -17,7 +17,7 @@ TESTPKGS = $(shell env GOPATH=$(GOPATH) $(GO) list -f '{{ if or .TestGoFiles .XT
 SRCROOT = $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/)
 BUILD_ROOT = $(SRCROOT)/build
 
-UPSTREAM_VERSION=$(shell git describe --tags HEAD)
+UPSTREAM_VERSION=$(shell git describe --tags HEAD |  sed 's/-.*//')
 registry_url ?= 514845858982.dkr.ecr.us-west-1.amazonaws.com
 #registry_url ?= docker.io
 
