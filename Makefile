@@ -14,6 +14,17 @@ BASE=$(GOPATH)/src/$(REPO_PATH)
 GOFILES = $(shell find . -name *.go | grep -vE "(\/vendor\/)|(_test.go)")
 PKGS     = $(or $(PKG),$(shell cd $(BASE) && env GOPATH=$(GOPATH) $(GO) list ./... | grep -v "^$(PACKAGE)/vendor/"))
 TESTPKGS = $(shell env GOPATH=$(GOPATH) $(GO) list -f '{{ if or .TestGoFiles .XTestGoFiles }}{{ .ImportPath }}{{ end }}' $(PKGS))
+SRCROOT = $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/)
+BUILD_ROOT = $(SRCROOT)/build
+
+UPSTREAM_VERSION=$(shell git describe --tags HEAD |  sed 's/-.*//')
+#registry_url ?= 514845858982.dkr.ecr.us-west-1.amazonaws.com
+registry_url ?= docker.io
+
+image_name = ${registry_url}/platform9/sriov-cni
+image_tag = $(UPSTREAM_VERSION)-pmk-$(TEAMCITY_BUILD_ID)
+PF9_TAG=$(image_name):${image_tag}
+
 
 export GOPATH
 export GOBIN
@@ -22,7 +33,7 @@ export GO111MODULE=on
 IMAGEDIR=$(BASE)/images
 DOCKERFILE=$(CURDIR)/Dockerfile
 TAG=ghcr.io/k8snetworkplumbingwg/sriov-cni
-PF9_TAG=docker.io/platform9/sriov-cni:v2.6.2-pmk
+
 
 # Accept proxy settings for docker 
 DOCKERARGS=
@@ -146,8 +157,12 @@ pf9-image: | $(BASE) ; $(info Building Docker image for pf9 Repo...) @ ## Build 
 	@docker build -t $(PF9_TAG) -f $(DOCKERFILE)  $(CURDIR) $(DOCKERARGS)
 
 pf9-push:
-	docker push $(PF9_TAG)
+	docker push $(PF9_TAG) && \
+	docker rmi $(PF9_TAG)
 
+scan:
+	docker run -v $(BUILD_ROOT)/luigi:/out -v /var/run/docker.sock:/var/run/docker.sock -v $(HOME)/.trivy:/root/.cache  aquasec/trivy image -s CRITICAL,HIGH -f json  --vuln-type library -o /out/library_vulnerabilities.json --exit-code 22 ${PF9_TAG}
+	docker run -v $(BUILD_ROOT)/luigi:/out -v /var/run/docker.sock:/var/run/docker.sock -v $(HOME)/.trivy:/root/.cache  aquasec/trivy image -s CRITICAL,HIGH -f json  --vuln-type os -o /out/os_vulnerabilities.json --exit-code 22 ${PF9_TAG}
 # Misc
 
 .PHONY: clean
