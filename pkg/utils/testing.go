@@ -7,17 +7,10 @@
 package utils
 
 import (
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"syscall"
 )
-
-func check(e error) {
-	if e != nil {
-		panic(e)
-	}
-}
 
 type tmpSysFs struct {
 	dirRoot      string
@@ -76,7 +69,7 @@ func CreateTmpSysFs() error {
 	originalRoot, _ := os.Open("/")
 	ts.originalRoot = originalRoot
 
-	tmpdir, err := ioutil.TempDir("/tmp", "sriovplugin-testfiles-")
+	tmpdir, err := os.MkdirTemp("/tmp", "sriovplugin-testfiles-")
 	if err != nil {
 		return err
 	}
@@ -91,7 +84,7 @@ func CreateTmpSysFs() error {
 	}
 
 	for filename, body := range ts.fileList {
-		if err := ioutil.WriteFile(filepath.Join(ts.dirRoot, filename), body, 0600); err != nil {
+		if err := os.WriteFile(filepath.Join(ts.dirRoot, filename), body, 0600); err != nil {
 			return err
 		}
 	}

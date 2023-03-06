@@ -1,13 +1,15 @@
 package utils
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 var (
@@ -16,9 +18,36 @@ var (
 	NetDirectory = "/sys/class/net"
 	// SysBusPci is sysfs pci device directory
 	SysBusPci = "/sys/bus/pci/devices"
+	// SysV4ArpNotify is the sysfs IPv4 ARP Notify directory
+	SysV4ArpNotify = "/proc/sys/net/ipv4/conf/"
+	// SysV6NdiscNotify is the sysfs IPv6 Neighbor Discovery Notify directory
+	SysV6NdiscNotify = "/proc/sys/net/ipv6/conf/"
 	// UserspaceDrivers is a list of driver names that don't have netlink representation for their devices
 	UserspaceDrivers = []string{"vfio-pci", "uio_pci_generic", "igb_uio"}
 )
+
+// EnableArpAndNdiscNotify enables IPv4 arp_notify and IPv6 ndisc_notify for netdev
+func EnableArpAndNdiscNotify(ifName string) error {
+	/* For arp_notify, when a value of "1" is set then a Gratuitous ARP request will be sent
+	 * when the network device is brought up or if the link-layer address changes.
+	 * For ndsic_notify, when a value of "1" is set then a Unsolicited Neighbor Advertisement
+	 * will be sent when the network device is brought up or if the link-layer address changes.
+	 * Both of these being enabled would be useful in the case when an application reenables
+	 * an interface or if the MAC address configuration is changed. The kernel is responsible
+	 * for sending of these packets when the conditions are met.
+	 */
+	v4ArpNotifyPath := filepath.Join(SysV4ArpNotify, ifName, "arp_notify")
+	err := os.WriteFile(v4ArpNotifyPath, []byte("1"), os.ModeAppend)
+	if err != nil {
+		return fmt.Errorf("failed to write arp_notify=1 for interface %s: %v", ifName, err)
+	}
+	v6NdiscNotifyPath := filepath.Join(SysV6NdiscNotify, ifName, "ndisc_notify")
+	err = os.WriteFile(v6NdiscNotifyPath, []byte("1"), os.ModeAppend)
+	if err != nil {
+		return fmt.Errorf("failed to write ndisc_notify=1 for interface %s: %v", ifName, err)
+	}
+	return nil
+}
 
 // GetSriovNumVfs takes in a PF name(ifName) as string and returns number of VF configured as int
 func GetSriovNumVfs(ifName string) (int, error) {
@@ -29,7 +58,7 @@ func GetSriovNumVfs(ifName string) (int, error) {
 		return vfTotal, fmt.Errorf("failed to open the sriov_numfs of device %q: %v", ifName, err)
 	}
 
-	data, err := ioutil.ReadFile(sriovFile)
+	data, err := os.ReadFile(sriovFile)
 	if err != nil {
 		return vfTotal, fmt.Errorf("failed to read the sriov_numfs of device %q: %v", ifName, err)
 	}
@@ -80,7 +109,7 @@ func GetPfName(vf string) (string, error) {
 		return "", err
 	}
 
-	files, err := ioutil.ReadDir(pfSymLink)
+	files, err := os.ReadDir(pfSymLink)
 	if err != nil {
 		return "", err
 	}
@@ -92,7 +121,7 @@ func GetPfName(vf string) (string, error) {
 	return strings.TrimSpace(files[0].Name()), nil
 }
 
-// GetPciAddress takes in a interface(ifName) and VF id and returns returns its pci addr as string
+// GetPciAddress takes in a interface(ifName) and VF id and returns its pci addr as string
 func GetPciAddress(ifName string, vf int) (string, error) {
 	var pciaddr string
 	vfDir := filepath.Join(NetDirectory, ifName, "device", fmt.Sprintf("virtfn%d", vf))
@@ -129,7 +158,7 @@ func GetSharedPF(ifName string) (string, error) {
 
 	fullpath, _ := filepath.EvalSymlinks(pfDir)
 	parentDir := fullpath[:len(fullpath)-len(ifName)]
-	dirList, _ := ioutil.ReadDir(parentDir)
+	dirList, _ := os.ReadDir(parentDir)
 
 	for _, file := range dirList {
 		if file.Name() != ifName {
@@ -149,7 +178,7 @@ func GetVFLinkNames(pciAddr string) (string, error) {
 		return "", err
 	}
 
-	fInfos, err := ioutil.ReadDir(vfDir)
+	fInfos, err := os.ReadDir(vfDir)
 	if err != nil {
 		return "", fmt.Errorf("failed to read net dir of the device %s: %v", pciAddr, err)
 	}
@@ -174,7 +203,7 @@ func GetVFLinkNamesFromVFID(pfName string, vfID int) ([]string, error) {
 		return nil, err
 	}
 
-	fInfos, err := ioutil.ReadDir(vfDir)
+	fInfos, err := os.ReadDir(vfDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read the virtfn%d dir of the device %q: %v", vfID, pfName, err)
 	}
@@ -233,7 +262,7 @@ func saveScratchNetConf(containerID, dataDir string, netconf []byte) error {
 
 	path := filepath.Join(dataDir, containerID)
 
-	err := ioutil.WriteFile(path, netconf, 0600)
+	err := os.WriteFile(path, netconf, 0600)
 	if err != nil {
 		return fmt.Errorf("failed to write container data in the path(%q): %v", path, err)
 	}
@@ -243,7 +272,7 @@ func saveScratchNetConf(containerID, dataDir string, netconf []byte) error {
 
 // ReadScratchNetConf takes in container ID, Pod interface name and data dir as string and returns a pointer to Conf
 func ReadScratchNetConf(cRefPath string) ([]byte, error) {
-	data, err := ioutil.ReadFile(cRefPath)
+	data, err := os.ReadFile(cRefPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read container data in the path(%q): %v", cRefPath, err)
 	}
@@ -254,7 +283,49 @@ func ReadScratchNetConf(cRefPath string) ([]byte, error) {
 // CleanCachedNetConf removed cached NetConf from disk
 func CleanCachedNetConf(cRefPath string) error {
 	if err := os.Remove(cRefPath); err != nil {
-		return fmt.Errorf("error removing NetConf file %s: %q", cRefPath, err)
+		return fmt.Errorf("error removing NetConf file %s: %v", cRefPath, err)
 	}
 	return nil
+}
+
+// IsValidMACAddress checks if net.HardwareAddr is a valid MAC address.
+func IsValidMACAddress(addr net.HardwareAddr) bool {
+	invalidMACAddresses := [][]byte{
+		{0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+		{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF},
+	}
+	valid := false
+	if len(addr) == 6 {
+		valid = true
+		for _, invalidMACAddress := range invalidMACAddresses {
+			if bytes.Equal(addr, invalidMACAddress) {
+				valid = false
+				break
+			}
+		}
+	}
+	return valid
+}
+
+// IsIPv4 checks if a net.IP is an IPv4 address.
+func IsIPv4(ip net.IP) bool {
+	return ip.To4() != nil
+}
+
+// IsIPv6 checks if a net.IP is an IPv6 address.
+func IsIPv6(ip net.IP) bool {
+	return ip.To4() == nil && ip.To16() != nil
+}
+
+// Retry retries a given function until no return error; times out after retries*sleep
+func Retry(retries int, sleep time.Duration, f func() error) error {
+	err := error(nil)
+	for retry := 0; retry < retries; retry++ {
+		err = f()
+		if err == nil {
+			return nil
+		}
+		time.Sleep(sleep)
+	}
+	return err
 }

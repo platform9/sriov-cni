@@ -1,5 +1,5 @@
 ---
-apiVersion: extensions/v1beta1
+apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: kube-sriov-cni-ds-amd64
@@ -8,21 +8,25 @@ metadata:
     tier: node
     app: sriov-cni
 spec:
+  selector:
+    matchLabels:
+      name: sriov-cni
   template:
     metadata:
       labels:
+        name: sriov-cni
         tier: node
         app: sriov-cni
     spec:
       nodeSelector:
-        beta.kubernetes.io/arch: amd64
+        kubernetes.io/arch: amd64
       tolerations:
       - key: node-role.kubernetes.io/master
         operator: Exists
         effect: NoSchedule
       containers:
       - name: kube-sriov-cni
-        image: ghcr.io/k8snetworkplumbingwg/sriov-cni:v2.6.1
+        image: ghcr.io/k8snetworkplumbingwg/sriov-cni
         imagePullPolicy: IfNotPresent
         securityContext:
           allowPrivilegeEscalation: false
