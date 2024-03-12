@@ -9,7 +9,7 @@ jobs:
   build-test:
     strategy:
       matrix:
-        go-version: [1.19.x]
+        go-version: [1.21.x]
         os: [ubuntu-latest]
         goos: [linux]
         goarch: [amd64, arm64, ppc64le]
@@ -18,12 +18,12 @@ jobs:
       GO111MODULE: on
     steps:
       - name: Set up Go
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@v4
         with:
           go-version: ${{ matrix.go-version }}
 
       - name: Check out code into the Go module directory
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Build test for ${{ matrix.goarch }}
         env:
@@ -33,7 +33,7 @@ jobs:
 
       - name: Go test
         if: ${{ matrix.goarch }} == "amd64"
-        run: sudo go test ./... # sudo needed for netns change in test
+        run: sudo go test -race ./... # sudo needed for netns change in test
 
   coverage:
     runs-on: ubuntu-latest
@@ -41,9 +41,9 @@ jobs:
     name: coverage
     steps:
       - name: Set up Go
-        uses: actions/setup-go@v1
+        uses: actions/setup-go@v4
         with:
-          go-version: 1.19.x
+          go-version: 1.21.x
 
       - name: Check out code into the Go module directory
         uses: actions/checkout@v2
@@ -52,7 +52,38 @@ jobs:
         run: sudo make test-coverage # sudo needed for netns change in test
       
       - name: Coveralls
-        uses: coverallsapp/github-action@1.1.3
+        uses: coverallsapp/github-action@v2
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          path-to-lcov: test/coverage/lcov.info
+          file: test/coverage/lcov.info
+
+  sriov-operator-e2e-test:
+    name: SR-IOV operator e2e tests
+    needs: [ build-test ]
+    runs-on: [ sriov ]
+    env:
+      TEST_REPORT_PATH: k8s-artifacts
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v3
+
+      - name: build sriov-cni image
+        run: podman build -t ghaction-sriov-cni:pr-${{github.event.pull_request.number}} .
+  
+      - name: Check out sriov operator's code
+        uses: actions/checkout@v2
+        with:
+          repository: k8snetworkplumbingwg/sriov-network-operator
+          path: sriov-network-operator-wc
+
+      - name: run test
+        run: make test-e2e-conformance-virtual-k8s-cluster-ci
+        working-directory: sriov-network-operator-wc
+        env:
+          LOCAL_SRIOV_CNI_IMAGE: ghaction-sriov-cni:pr-${{github.event.pull_request.number}}
+
+      - uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: ${{ env.TEST_REPORT_PATH }}
+          path: ./sriov-network-operator-wc/${{ env.TEST_REPORT_PATH }}
